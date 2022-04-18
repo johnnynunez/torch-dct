@@ -2,6 +2,34 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+try:
+    # PyTorch 1.7.0 and newer versions
+    import torch.fft
+
+
+    def dct1_rfft_impl(x):
+        return torch.view_as_real(torch.fft.rfft(x, dim=1))
+
+
+    def dct_fft_impl(v):
+        return torch.view_as_real(torch.fft.fft(v, dim=1))
+
+
+    def idct_irfft_impl(V):
+        return torch.fft.irfft(torch.view_as_complex(V), n=V.shape[1], dim=1)
+except ImportError:
+    # PyTorch 1.6.0 and older versions
+    def dct1_rfft_impl(x):
+        return torch.rfft(x, 1)
+
+
+    def dct_fft_impl(v):
+        return torch.rfft(v, 1, onesided=False)
+
+
+    def idct_irfft_impl(V):
+        return torch.irfft(V, 1, onesided=False)
+
 
 def dct1(x):
     """
@@ -12,8 +40,9 @@ def dct1(x):
     """
     x_shape = x.shape
     x = x.view(-1, x_shape[-1])
+    x = torch.cat([x, x.flip([1])[:, 1:-1]], dim=1)
 
-    return torch.rfft(torch.cat([x, x.flip([1])[:, 1:-1]], dim=1), 1)[:, :, 0].view(*x_shape)
+    return dct1_rfft_impl(x)[:, :, 0].view(*x_shape)
 
 
 def idct1(X):
@@ -46,7 +75,7 @@ def dct(x, norm=None):
 
     v = torch.cat([x[:, ::2], x[:, 1::2].flip([1])], dim=1)
 
-    Vc = torch.rfft(v, 1, onesided=False)
+    Vc = dct_fft_impl(v)
 
     k = - torch.arange(N, dtype=x.dtype, device=x.device)[None, :] * np.pi / (2 * N)
     W_r = torch.cos(k)
@@ -98,7 +127,7 @@ def idct(X, norm=None):
 
     V = torch.cat([V_r.unsqueeze(2), V_i.unsqueeze(2)], dim=2)
 
-    v = torch.irfft(V, 1, onesided=False)
+    v = idct_irfft_impl(V)
     x = v.new_zeros(v.shape)
     x[:, ::2] += v[:, :N - (N // 2)]
     x[:, 1::2] += v.flip([1])[:, :N // 2]
@@ -178,10 +207,11 @@ def idct_3d(X, norm=None):
 
 class LinearDCT(nn.Linear):
     """Implement any DCT as a linear layer; in practice this executes around
-    50x faster on GPU. Unfortunately, the DCT matrix is stored, which will 
+    50x faster on GPU. Unfortunately, the DCT matrix is stored, which will
     increase memory usage.
     :param in_features: size of expected input
     :param type: which dct function in this file to use"""
+
     def __init__(self, in_features, type, norm=None, bias=False):
         self.type = type
         self.N = in_features
@@ -199,7 +229,7 @@ class LinearDCT(nn.Linear):
             self.weight.data = dct(I, norm=self.norm).data.t()
         elif self.type == 'idct':
             self.weight.data = idct(I, norm=self.norm).data.t()
-        self.weight.requires_grad = False # don't learn this!
+        self.weight.requires_grad = False  # don't learn this!
 
 
 def apply_linear_2d(x, linear_layer):
@@ -212,6 +242,7 @@ def apply_linear_2d(x, linear_layer):
     X2 = linear_layer(X1.transpose(-1, -2))
     return X2.transpose(-1, -2)
 
+
 def apply_linear_3d(x, linear_layer):
     """Can be used with a LinearDCT layer to do a 3D DCT.
     :param x: the input signal
@@ -223,13 +254,13 @@ def apply_linear_3d(x, linear_layer):
     X3 = linear_layer(X2.transpose(-1, -3))
     return X3.transpose(-1, -3).transpose(-1, -2)
 
+
 if __name__ == '__main__':
-    x = torch.Tensor(1000,4096)
-    x.normal_(0,1)
+    x = torch.Tensor(1000, 4096)
+    x.normal_(0, 1)
     linear_dct = LinearDCT(4096, 'dct')
     error = torch.abs(dct(x) - linear_dct(x))
     assert error.max() < 1e-3, (error, error.max())
     linear_idct = LinearDCT(4096, 'idct')
     error = torch.abs(idct(x) - linear_idct(x))
     assert error.max() < 1e-3, (error, error.max())
-

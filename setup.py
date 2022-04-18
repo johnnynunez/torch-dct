@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name='torch-dct',
-    version='0.1.5',
+    version='0.1.6',
     packages=['torch_dct'],
     platforms='any',
     classifiers=[
@@ -11,7 +11,7 @@ setup(
         'Programming Language :: Python :: 2',
         'Programming Language :: Python :: 3'
     ],
-    install_requires=['torch>=0.4.1'],
+    install_requires=['torch>=1.11.0'],
     url='https://github.com/zh217/torch-dct',
     license='MIT',
     author='Ziyang Hu',
